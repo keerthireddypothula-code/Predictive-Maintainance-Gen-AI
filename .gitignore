@@ -1,0 +1,119 @@
+# ============================================================
+# .gitignore — Files and directories Git should ignore
+# ============================================================
+# WHY: Prevents committing secrets, large files, and
+# auto-generated files to your repository.
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.whl
+
+# --- Virtual Environment ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Environment Variables (SECRETS!) ---
+# Ignore every .env variant, but keep the committed template.
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# --- Editor / local tool state ---
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+
+# --- Data (too large for Git) ---
+data/raw/*
+data/processed/*
+# Keep the sample data and directory structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/sample/
+
+# --- Model Artifacts (too large for Git) ---
+# metrics.json and training_history.json are deliberately NOT ignored:
+# they are small, and they are the auditable evidence of what a given
+# commit's model actually achieved.
+models/*.h5
+models/*.keras
+models/*.pkl
+models/*.joblib
+models/*.pb
+models/*.ckpt
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.tflite
+models/saved_model/
+models/checkpoints/
+# Resume state pairs with a checkpoint — useless without the .keras it describes.
+models/*.state.json
+!models/.gitkeep
+
+# --- Experiment tracking (if added later) ---
+mlruns/
+wandb/
+.tensorboard/
+runs/
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Testing & Tooling Caches ---
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Merge / patch leftovers ---
+*.orig
+*.rej
+*.bak
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Local working notes (deliberately not published) ---
+# Scratch state for work in progress: local paths, half-finished measurements,
+# and notes that are not yet true. Ignored rather than merely untracked, because
+# a `git add -A` would otherwise sweep it into a commit and publish it.
+docs/PROJECT_STATE.md
+docs/SCRATCH.md
+NOTES.local.md
+
+# Stray uv artifact: nothing here uses uv (the project is pip + venv, see the
+# Makefile). A bare `uv` invocation in this directory drops a 155-byte lockfile
+# that resolves no dependencies at all, so it is noise, not a lockfile.
+uv.lock

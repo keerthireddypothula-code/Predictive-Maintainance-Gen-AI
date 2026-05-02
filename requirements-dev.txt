@@ -1,0 +1,40 @@
+# ============================================================
+# Development-Only Dependencies
+# ============================================================
+# Install: pip install -r requirements-dev.txt
+# These are NOT deployed to production.
+# ============================================================
+
+# Include BOTH service stacks — local development runs the API and the
+# dashboard on one machine, even though their images do not.
+-r requirements.txt
+-r requirements-dashboard.txt
+
+# --- Testing ---
+pytest>=7.4.0,<9.0.0
+pytest-cov>=4.1.0,<6.0.0
+pytest-asyncio>=0.23.0,<1.0.0
+
+# --- Code Quality ---
+# Pinned in their own file so CI's quality job can install just these, and so
+# there is exactly one place the versions are declared.
+-r requirements-lint.txt
+
+# --- Notebooks ---
+jupyter>=1.0.0,<2.0.0
+ipykernel>=6.0.0,<7.0.0
+matplotlib>=3.8.0,<4.0.0
+seaborn>=0.13.0,<1.0.0
+
+# --- Development Utilities ---
+httpx>=0.27.0,<1.0.0
+
+# Used by tests/integration/test_llm_grounding.py to probe whether a local
+# Ollama server is running before attempting a live-model check.
+requests>=2.31,<3.0
+
+# Drives the real dashboard in a real browser for scripts/capture_screenshots.py,
+# which regenerates the README's dashboard images. Needs `playwright install
+# chromium` once after installing.
+playwright>=1.40,<2.0
+pre-commit>=3.6.0,<4.0.0

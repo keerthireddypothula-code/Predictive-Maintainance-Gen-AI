@@ -1,0 +1,176 @@
+# ============================================================
+# pyproject.toml — Project Metadata & Tool Configuration
+# ============================================================
+# WHY: This is the modern standard (PEP 621) for Python project
+# configuration. It replaces setup.py, setup.cfg, and consolidates
+# tool configs (Black, pytest, isort) into a single file.
+# ============================================================
+
+# ---- Build backend ----
+# Declared explicitly rather than relying on pip's legacy fallback. Without a
+# [build-system] table pip guesses a backend and setuptools guesses which
+# directories are packages — and this project has a flat layout with several
+# top-level directories, which is exactly the case auto-discovery gets wrong.
+# `pip install -e .` happened to work; "happened to" is not a build contract.
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+# Runtime dependencies are read from requirements.txt rather than duplicated
+# here. Two lists of pins drift, and this project has been bitten by two
+# sources of truth before; requirements.txt stays canonical because it is what
+# the Dockerfiles and CI install.
+#
+# Without this the built wheel declared ONLY the optional extras and no base
+# dependencies at all, so `pip install` produced a package that ImportErrors on
+# `import src.prediction`.
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+# `src` and `config` are the importable top-level packages, because that is
+# what the code imports (`from src.prediction import Predictor`). dashboard/ is
+# a Streamlit script directory, not a package, and is deliberately excluded —
+# it is deployed as its own container and imports nothing from src/.
+include = ["src*", "config*"]
+
+[project]
+name = "predictive-maintenance-genai"
+version = "1.0.1"
+description = "Predict equipment failure 24 hours ahead from sensor telemetry, and explain each prediction in plain English"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"  # TensorFlow has no wheels for 3.13+; 3.12 is what this project is developed on
+dynamic = ["dependencies"]
+license = {text = "MIT"}
+authors = [
+    {name = "Keerthi Reddy Pothula", email = "keerthireddypothula@gmail.com"},
+]
+maintainers = [
+    {name = "Keerthi Reddy Pothula", email = "keerthireddypothula@gmail.com"},
+]
+keywords = [
+    "predictive-maintenance",
+    "machine-learning",
+    "deep-learning",
+    "tensorflow",
+    "keras",
+    "lstm",
+    "time-series",
+    "anomaly-detection",
+    "condition-monitoring",
+    "langchain",
+    "genai",
+    "llm",
+    "fastapi",
+    "streamlit",
+    "mlops",
+]
+classifiers = [
+    # Development Status :: 5 - Production/Stable would overstate this. The
+    # pipeline is complete and tested end to end, but it has only ever been
+    # validated against a synthetic dataset — see docs/model.md#limitations.
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/keerthireddypothula-code/Predictive-Maintenance-GenAI"
+Repository = "https://github.com/keerthireddypothula-code/Predictive-Maintenance-GenAI"
+Documentation = "https://github.com/keerthireddypothula-code/Predictive-Maintenance-GenAI/tree/main/docs"
+Changelog = "https://github.com/keerthireddypothula-code/Predictive-Maintenance-GenAI/blob/main/CHANGELOG.md"
+Issues = "https://github.com/keerthireddypothula-code/Predictive-Maintenance-GenAI/issues"
+
+# ---- Optional LLM providers ----
+# WHY THESE ARE DECLARED HERE AND NOT IN requirements.txt:
+#   src/genai/chains.py imports both packages lazily, inside get_llm(), so that
+#   the base install stays small and a missing provider produces a readable
+#   LLMConnectionError instead of an ImportError at module load. That design is
+#   right — but until now neither package was named in ANY installable file, so
+#   the only record that they exist was a string inside an error message.
+#
+#   That mattered most for `ollama`, which is the keyless path the README leads
+#   with. Without langchain-ollama installed, chains.py silently falls back to
+#   `langchain_community.chat_models.ChatOllama`, which is deprecated and slated
+#   for removal in langchain-community 1.0 — inside the `<1.0.0` range
+#   requirements.txt already allows. The fallback works today and emits a
+#   DeprecationWarning; the extra is how you get the supported class.
+#
+#   Install:  pip install -e ".[ollama]"     # keyless local model
+#             pip install -e ".[google]"     # Gemini
+#             pip install -e ".[llm]"        # both
+[project.optional-dependencies]
+ollama = ["langchain-ollama>=0.1.0,<1.0.0"]
+google = ["langchain-google-genai>=1.0.0,<3.0.0"]
+llm = ["langchain-ollama>=0.1.0,<1.0.0", "langchain-google-genai>=1.0.0,<3.0.0"]
+
+# ---- Black (Code Formatter) ----
+# WHY: Black enforces a consistent code style automatically.
+# No more debates about formatting — just run `black .`
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+
+# ---- isort (Import Sorter) ----
+# WHY: Keeps imports organized. The "black" profile ensures
+# isort and Black don't conflict with each other.
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["src", "config"]
+
+# ---- pytest (Testing) ----
+# WHY: Centralizes pytest configuration instead of using pytest.ini
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Integration tests are excluded by default: they score the full 876K-row
+# dataset (minutes, and the data is gitignored). Run them explicitly with
+# `make test-integration` after touching feature engineering or scaling.
+addopts = "-v --tb=short --strict-markers -m 'not integration'"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks integration tests",
+    "unit: marks unit tests",
+]
+
+# ---- mypy (Type Checking) ----
+# WHY: Catches type errors before runtime. Essential for production code.
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+# Kept off deliberately. src/ and config/ pass mypy cleanly as of Day 12, but
+# turning this on adds ~100 signature annotations across test helpers and
+# private methods for little safety gain. The blocking gate is the clean run,
+# not maximal strictness.
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+# ---- coverage.py ----
+# WHY: `make test-cov` measures src/ and config/; everything else is either
+# tooling or generated. Test files themselves are excluded from the report.
+[tool.coverage.run]
+source = ["src", "config"]
+omit = ["*/__init__.py", "*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
