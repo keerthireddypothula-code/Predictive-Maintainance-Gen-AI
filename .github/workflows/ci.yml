@@ -1,0 +1,283 @@
+# =============================================================================
+# .github/workflows/ci.yml
+# =============================================================================
+# WHY THIS EXISTS:
+#   `make quality` was configured on Day 1 and never actually run until Day 4,
+#   by which point 14 files had drifted out of Black compliance and flake8
+#   reported 51 issues. A gate nobody runs is not a gate. This runs it on every
+#   push and pull request.
+#
+# WHY IT WORKS WITHOUT THE DATASET:
+#   data/raw/ and models/ are gitignored — together about 5 GB. The suite is
+#   built to survive their absence: tests needing a trained model skip rather
+#   than fail, and everything else runs against the committed data/sample/
+#   fixture. Verified locally by hiding both and re-running: 228 pass, 18 skip.
+#   That is precisely the state this job sees.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch cancels the previous run — no point finishing
+# a build for a commit that has already been superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TensorFlow publishes no wheels for 3.13+. Pinned here for the same reason
+  # it is pinned in pyproject.toml and the Dockerfiles.
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  quality:
+    name: Lint, format, types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-lint.txt
+
+      - name: Install tooling
+        # Only the linters — this job does not need TensorFlow, and skipping
+        # it turns a multi-minute install into seconds.
+        #
+        # From the pinned file, NOT `pip install black isort flake8 mypy`.
+        # Unpinned, this step installed whatever had released that morning:
+        # Black 26.5.1 and mypy 2.3.1 against a tree developed against
+        # 24.10.0 and 1.20.2, both outside the project's own declared bounds.
+        # A formatter release would then turn the build red with no code
+        # change, and disagree with every local run.
+        run: pip install -r requirements-lint.txt
+
+      # Through `make`, not a second copy of the path list. The Makefile's
+      # PY_PATHS is the only place the checked paths are declared; when they
+      # lived here too, the local targets checked three paths and this job
+      # checked five, so `make quality` was green on a laptop for a commit
+      # that went red here.
+      - name: flake8
+        run: make lint
+
+      - name: black --check / isort --check
+        run: make format-check
+
+      - name: mypy
+        # Blocking as of Day 12: src/ and config/ are clean (0 errors across
+        # 29 files). It was advisory while 159 errors stood, because a build
+        # that is permanently red teaches people to ignore red builds — that
+        # reasoning no longer applies now the debt is paid.
+        #
+        # `--no-site-packages` states out loud what this job was already
+        # doing. Because only the linters are installed, mypy cannot see
+        # pandas or langchain, and `ignore_missing_imports` turns every
+        # symbol from them into `Any`. Combined with `warn_return_any` that
+        # is a real check — it forces third-party seams to be annotated —
+        # but it is a DIFFERENT check from the one a developer runs against a
+        # full venv, which is how four `no-any-return` errors reached main
+        # green-on-a-laptop. The flag makes the difference reproducible:
+        # `make typecheck` now runs both modes locally.
+        run: mypy --no-site-packages src/ config/
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Unit tests
+        # data/sample/ is committed precisely so this works on a clean
+        # checkout. Tests needing a trained model skip themselves.
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Integration tests
+        # Excluded from the default run because they are slow; they skip
+        # cleanly here since the generated dataset is absent. Kept in CI so
+        # the marker itself does not rot.
+        run: python -m pytest tests/integration -v --tb=short -m integration
+
+      - name: Coverage
+        run: |
+          python -m pytest tests/ --cov=src --cov=config \
+            --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: unit
+          name: unit-${{ env.PYTHON_VERSION }}
+          # Public repos can upload tokenlessly, but rate limits make that
+          # flaky; the token is used when the secret exists and skipped when
+          # it does not, so a fork's CI is not broken by its absence.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # Coverage reporting is diagnostic, not a gate. The blocking checks
+          # are lint, types, and the test suite itself — a Codecov outage
+          # should not turn this build red.
+          fail_ci_if_error: false
+          # ...but a swallowed failure must still be READABLE. Without this,
+          # a rejected upload and a successful one produce an identical green
+          # step, which is the silent-failure mode this project tries hard to
+          # avoid everywhere else. verbose puts the reason in the log.
+          verbose: true
+
+      - name: Upload coverage artifact
+        # Kept alongside Codecov so the raw report is retrievable from the run
+        # itself, without depending on a third party.
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          retention-days: 7
+
+  python-floor:
+    # pyproject declares requires-python >=3.10, but the suite above runs on
+    # 3.12 only — which is how tests importing tomllib (3.11+) went unnoticed.
+    # The full suite needs TensorFlow; these are the tests that parse
+    # pyproject.toml, so they are what a 3.10 floor actually exercises here.
+    name: Python 3.10 floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install "pytest>=7.4.0,<9.0.0" "pydantic-settings>=2.0.0,<3.0.0"
+      # --noconftest: conftest.py imports TensorFlow, which this job omits.
+      - run: >-
+          python -m pytest tests/unit/test_smoke.py --noconftest -o addopts=""
+          -k "TestVersion or TestPackaging"
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: pip-audit
+        # Advisory: a transitive CVE in TensorFlow's dependency tree should
+        # surface, but should not block a documentation commit. Revisit once
+        # the noise level is known.
+        run: |
+          pip install pip-audit
+          pip-audit --requirement requirements.txt --desc || true
+
+  docker:
+    name: Build images
+    runs-on: ubuntu-latest
+    # Only worth the minutes if the code is already known good.
+    needs: [quality, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: false
+          load: true
+          tags: predictive-maintenance-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.dashboard
+          push: false
+          load: true
+          tags: predictive-maintenance-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report image sizes
+        # The dashboard image should be a fraction of the API's. If that gap
+        # closes, something has started importing the ML stack into the UI —
+        # exactly what the dashboard's import tests exist to prevent.
+        run: |
+          docker images predictive-maintenance-api:ci \
+            --format 'API image:       {{.Size}}'
+          docker images predictive-maintenance-dashboard:ci \
+            --format 'Dashboard image: {{.Size}}'
+
+      - name: Smoke-test the API image
+        # No model or dataset is mounted, so the API must start DEGRADED and
+        # still answer /health. That is the behaviour AppState.startup() was
+        # written for, and this is the only place it gets exercised for real.
+        #
+        # `python3`, not `python`: ubuntu-latest ships python3 and this job
+        # has no setup-python step (it does not need one — it only builds
+        # images). Bare `python` is not on PATH here, and the original version
+        # of this step would have failed with "command not found" while
+        # looking like a smoke-test failure.
+        run: |
+          set -euo pipefail
+          docker run -d --name api-smoke -p 8000:8000 predictive-maintenance-api:ci
+
+          ready=""
+          for _ in $(seq 1 40); do
+            if curl -sf --max-time 5 http://localhost:8000/health > /dev/null; then
+              ready=yes
+              break
+            fi
+            sleep 3
+          done
+
+          # Distinguish "never came up" from "came up wrong" — otherwise the
+          # parse below fails on an empty body and the real cause is buried.
+          if [ -z "$ready" ]; then
+            echo "The API container never answered /health within 120s."
+            docker logs api-smoke
+            exit 1
+          fi
+
+          body=$(curl -s --max-time 5 http://localhost:8000/health)
+          echo "--- /health ---"
+          echo "$body"
+
+          state=$(echo "$body" | python3 -c \
+            'import sys, json; print(json.load(sys.stdin)["status"])')
+          echo "status: $state"
+
+          if [ "$state" != "degraded" ]; then
+            echo "Expected 'degraded' with no model mounted, got '$state'"
+            docker logs api-smoke
+            exit 1
+          fi
+          echo "Correct: the API starts and reports degraded rather than crashing."
+
+      - name: Remove the smoke-test container
+        # always(), so a failed assertion above still cleans up rather than
+        # leaving a container holding port 8000 for any later step.
+        if: always()
+        run: docker rm -f api-smoke || true
