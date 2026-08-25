@@ -1,0 +1,17 @@
+# Requests review from the maintainer on every pull request.
+# Format: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+*       @keerthireddypothula-code
+
+# Areas where a change is most likely to break something silently.
+# Called out so the reason is visible in the review request, not just the rule.
+
+# Leakage and training/serving skew live here.
+/src/data/          @keerthireddypothula-code
+/src/prediction/    @keerthireddypothula-code
+
+# The alert threshold and risk bands decide what a technician is told.
+/config/settings.py @keerthireddypothula-code
+
+# Import order in src/models/__init__.py is load-bearing — see CONTRIBUTING.md.
+/src/models/        @keerthireddypothula-code
